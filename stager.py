@@ -18,6 +18,9 @@ ALLCV_FILENAME        = "__allcv"
 CONFIGURATION_FILENAME= "__configuration"
 
 class ActionBase:
+    def __init__(self, args=""):
+        pass
+
     def execute(self, env):
         pass
 
@@ -65,6 +68,13 @@ class ActionDefault(ActionBase):
 
 def isFWfile(filename):
     reg = re.search(r"SP\d+-\d{6}\S\.ZPL", filename.upper())
+    with open(filename, "rb") as printerfile:
+        line = printerfile.readline()
+        if b"! PROGRAM" in line:
+            return True
+        else:
+            return False
+
     if (reg == None):
         return False
     else:
@@ -72,8 +82,8 @@ def isFWfile(filename):
 
 class ActionDownload(ActionBase):
     NAME = "Download"
-    def __init__(self, filename):
-        self.filename = filename
+    def __init__(self, arg):
+        self.filename = arg
     
     def validate(self, env):
         if not os.path.isfile(os.path.join(env.staging_dir, self.filename)):
@@ -82,15 +92,16 @@ class ActionDownload(ActionBase):
 
     def execute(self, env):
         print("Downloading file: {}".format(self.filename))
-        env.printer.send_file(os.path.join(env.staging_dir, self.filename))
-        if (isFWfile(self.filename)):
+        fullFilePath = os.path.join(env.staging_dir, self.filename);
+        env.printer.send_file(fullFilePath)
+        if (isFWfile(fullFilePath)):
             env.printer.device_reset(timeout=180)
             time.sleep(30)
         else:
             time.sleep(0.5)
 
     def serialize(self):
-        return "{}: {}".format(self.NAME, self.filename)
+        return "{}[{}]".format(self.NAME, self.filename)
 
 class ActionGetALLCV(ActionBase):
     NAME = "GetALLCV"
@@ -250,19 +261,24 @@ class ActionFactory:
                 ActionEDriveDiff,
                 ]
 
-    # NEED TO IMPROVE THIS
+    def parseArg(self, inputString):
+        result = re.search(r'\[(.*)\]', inputString)
+        if result == None:
+            return ""
+        else:
+            return result.group(1)
+
     def create(self, inputString):
         for actionType in self.actionList:
-            print (actionType.NAME)
-            if actionType.NAME in inputString:
-                return actionType()
+            if actionType.NAME in inputString: # TODO: Should only check the start of the string
+                return actionType(self.parseArg(inputString))
 
     def createFromDir(self, dirPath):
         actionList = []
         
         filesInDir = get_files(dirPath)
         for fileToStage in filesInDir:
-            if (isFWfile(fileToStage)):
+            if (isFWfile(os.path.join(dirPath, fileToStage))):
                 # Download fw first
                 actionList.insert(0, ActionDownload(fileToStage))
                 actionList.insert(1, ActionDefault())
@@ -274,6 +290,7 @@ class ActionFactory:
         actionList.append(ActionTestSettings())
         actionList.append(ActionGetALLCV())
         actionList.append(ActionGet2Key())
+        actionList.append(ActionEDriveDiff())
 
         return actionList
 
